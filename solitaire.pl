@@ -242,7 +242,7 @@ sub show_card {
 }
 
 sub init_background {
-    my $background   = SDLx::Sprite->new(image => 'res/0002.png');
+    my $background   = SDLx::Sprite->new(image => 'data/background.png');
        $layers->add($background, {id => 'background'});
     for(0..6) {
         my $empty_stack  = SDLx::Sprite->new(image => 'data/empty_stack.png');

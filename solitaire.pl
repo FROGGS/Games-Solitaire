@@ -3,12 +3,12 @@
 =pod TODO
 
 ( ) Karten ablegen automatisch
-( ) Platzhalter neben Stapel
 ( ) LayerManager: indirekte überdeckende Karten
+( ) Karten oben rechts nicht oben rechts anlegbar
+( ) Doppelklick legt auf falsche Farbe (kreuz 10 auf roten bube)
+( ) Könige können oben rechts nicht abgelegt werden
 
 =cut
-
-
 
 package Games::Solitaire;
 
@@ -17,57 +17,35 @@ use warnings;
 use Time::HiRes;
 
 use SDL;
-#use SDL::Color;
 use SDL::Event;
 use SDL::Events;
-#use SDL::GFX::Primitives;
-#use SDL::GFX::Rotozoom;
-#use SDL::Image;
 use SDL::Rect;
 use SDL::Surface;
-#use SDL::TTF;
-#use SDL::TTF::Font;
 use SDL::Video;
 
-#use SDLx::FPS;
 use SDLx::SFont;
 use SDLx::Surface;
 use SDLx::Sprite;
 
-use lib 'lib';
 use SDLx::LayerManager;
+use SDLx::Layer;
+use SDLx::FPS;
 
 SDL::init(SDL_INIT_VIDEO);
-my $display      = SDL::Video::set_video_mode(800, 600, 32, SDL_HWSURFACE | SDL_DOUBLEBUF | SDL_HWACCEL);
+my $display      = SDL::Video::set_video_mode(800, 600, 32, SDL_HWSURFACE | SDL_HWACCEL); # SDL_DOUBLEBUF
 my $layers       = SDLx::LayerManager->new();
 my $event        = SDL::Event->new();
 my $loop         = 1;
-my $usec         = Time::HiRes::time;
 my $last_click   = Time::HiRes::time;
-#my @rects        = ();
-#my $fps          = SDLx::FPS->new(fps => 30);
+my $fps          = SDLx::FPS->new(fps => 60);
 my @selected_cards = ();
 my $left_mouse_down = 0;
 
-#SDL::TTF::init();
-#my $sfont = SDLx::SFont->new('data/font.png');
-
-#my $font      = SDL::TTF::Font->new('data/gnuolane free.ttf', 20);
-#my $font_rect = SDL::Rect->new(10, 10, 70, 30);
-
 init_background();
 init_cards();
-$layers->blit($display);
+my @rects = @{$layers->blit($display)};
+SDL::Video::update_rects($display, @rects) if scalar @rects;
 game();
-
-sub draw {
-    my $usec_ = Time::HiRes::time;
-    if($usec_ > $usec + 5/60) {
-        $layers->blit($display);
-        SDL::Video::flip($display);
-        $usec = $usec_;
-    }
-}
 
 sub event_loop
 {
@@ -88,20 +66,36 @@ sub event_loop
         $handler->{on_dblclick}->()     if defined $handler->{on_dblclick}  && $event->type == SDL_MOUSEBUTTONDOWN && Time::HiRes::time - $last_click < 0.3;
         
         $last_click = Time::HiRes::time if $event->type == SDL_MOUSEBUTTONDOWN;
-        draw();
-    }
-}
+        
+        if($event->type == SDL_MOUSEBUTTONUP) {
+            my $dropped = 1;
+            while($dropped) {
+                $dropped = 0;
+                for(-1..6) {
+                    my $layer = $_ == -1
+                              ? $layers->by_position( 150, 40 )
+                              : $layers->by_position( 40 + 110 * $_, 220 );
+                    my @stack = ($layer, @{$layer->ahead});
+                       $layer = pop @stack if scalar @stack;
+                    
+                    if(defined $layer
+                    && $layer->data->{id} =~ m/\d+/
+                    && $layer->data->{visible}
+                    && !scalar @{$layer->ahead}) {
+                        my $target = $layers->by_position(370 + 110 * int($layer->data->{id} / 13), 40);
 
-sub menu
-{
-    my $handler =
-    {
-        on_quit    => sub {
-            $loop = 0;
-        },
-    };
-    
-    event_loop($handler);
+                        if(can_drop($layer->data->{id}, $target->data->{id})) {
+                            $layer->attach($event->button_x, $event->button_y);
+                            $layer->foreground;
+                            $layer->detach_xy($target->pos->x, $target->pos->y);
+                            show_card(pop @stack) if scalar @stack;
+                            $dropped = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 sub game
@@ -118,62 +112,88 @@ sub game
         },
         on_drop    => sub {
             if(scalar @selected_cards) {
-                @selected_cards = $layers->foreground(@selected_cards);
+                my @selected_cards_ = ();
+                push(@selected_cards_, $_->foreground) for @selected_cards;
                 
-                my @stack = $layers->get_layers_behind_layer($selected_cards[0]);
-
-                my $dropped = 0;
+                my @stack           = scalar @selected_cards_
+                                    ? @{$selected_cards[0]->behind}
+                                    : ();
+                my $dropped         = 0;
                 my @position_before = ();
                 
                 if(scalar @stack) {
                     # auf leeres Feld
-                    if($layers->[$stack[0]]->{options}->{id} =~ m/empty_stack/
-                       && can_drop($layers->[$selected_cards[0]]->{options}->{id}, $layers->[$stack[0]]->{options}->{id})) {
-                        @position_before = $layers->detach_xy($layers->[$stack[0]]->{layer}->x, $layers->[$stack[0]]->{layer}->y);
+                    if($stack[0]->data->{id} =~ m/empty_stack/
+                       && can_drop($selected_cards[0]->data->{id}, $stack[0]->data->{id})) {
+                        @position_before = @{$layers->detach_xy($stack[0]->pos->x, $stack[0]->pos->y)};
                         $dropped         = 1;
                     }
                     
                     # auf offene Karte
-                    elsif($layers->[$stack[0]]->{options}->{visible}
-                       && can_drop($layers->[$selected_cards[0]]->{options}->{id}, $layers->[$stack[0]]->{options}->{id})) {
-                        @position_before = $layers->detach_xy($layers->[$stack[0]]->{layer}->x, $layers->[$stack[0]]->{layer}->y + 20);
+                    elsif($stack[0]->data->{visible}
+                       && can_drop($selected_cards[0]->data->{id}, $stack[0]->data->{id})) {
+                        @position_before = @{$layers->detach_xy($stack[0]->pos->x, $stack[0]->pos->y + 20)};
                         $dropped         = 1;
                     }
                     
-                    if($dropped) {
+                    if($dropped && scalar @position_before) {
                         $position_before[0] += 20; # transparenter Rand
                         $position_before[1] += 20;
                         show_card(@position_before);
                     }
                 }
-                
+
                 $layers->detach_back unless $dropped;
             }
             @selected_cards = ();
         },
         on_click => sub {
             unless(scalar @selected_cards) {
-                my $layer = $layers->get_layer_by_position($event->button_x, $event->button_y);
+                my $layer = $layers->by_position($event->button_x, $event->button_y);
                 
-                if($layer > 0 && $layers->[$layer]->{options}->{id} =~ m/\d+/
-                              && $layers->[$layer]->{options}->{visible}) {
-                    @selected_cards = ($layer, $layers->get_layers_ahead_layer($layer));
-                    $layers->attach(@selected_cards, $event->button_x, $event->button_y);
+                if(defined $layer) {
+                    if($layer->data->{id} =~ m/^\d+$/) {
+                        if($layer->data->{visible}) {
+                            @selected_cards = ($layer, @{$layer->ahead});
+                            $layers->attach(@selected_cards, $event->button_x, $event->button_y);
+                        }
+                        elsif(!scalar @{$layer->ahead}) {
+                            $layer->attach($event->button_x, $event->button_y);
+                            $layer->foreground;
+                            $layer->detach_xy(130, 20);
+                            show_card($layer);
+                        }
+                    }
+                    elsif($layer->data->{id} =~ m/rewind_deck/) {
+                        $layer = $layers->by_position(150, 40);
+                        my @cards = ($layer, @{$layer->behind});
+                        pop @cards;
+                        foreach(@cards) {
+                            $_->attach(150, 40);
+                            $_->foreground;
+                            $_->detach_xy(20, 20);
+                            hide_card(40, 40);
+                        }
+                    }
                 }
             }
         },
         on_dblclick => sub {
             $last_click = 0;
             $layers->detach_back;
-            my $layer  = $layers->get_layer_by_position($event->button_x, $event->button_y);
-            if($layer > 0 && $layers->[$layer]->{options}->{id} =~ m/\d+/
-                          && $layers->[$layer]->{options}->{visible}) {
-                my $target = $layers->get_layer_by_position(370 + 110 * int($layers->[$layer]->{options}->{id} / 13), 40);
 
-                if(can_drop($layers->[$layer]->{options}->{id}, $layers->[$target]->{options}->{id})) {
-                    $layers->attach($layer, $event->button_x, $event->button_y);
-                    $layers->foreground($layer);
-                    $layers->detach_xy($layers->[$target]->{layer}->x, $layers->[$target]->{layer}->y);
+            my $layer  = $layers->by_position($event->button_x, $event->button_y);
+
+            if(defined $layer
+            && !scalar @{$layer->ahead}
+            && $layer->data->{id} =~ m/\d+/
+            && $layer->data->{visible}) {
+                my $target = $layers->by_position(370 + 110 * int($layer->data->{id} / 13), 40);
+
+                if(can_drop($layer->data->{id}, $target->data->{id})) {
+                    $layer->attach($event->button_x, $event->button_y);
+                    $layer->foreground;
+                    $layer->detach_xy($target->pos->x, $target->pos->y);
                     show_card($event->button_x, $event->button_y);
                 }
             }
@@ -182,24 +202,24 @@ sub game
     
     while($loop) {
         event_loop($handler);
-        draw();
-        #$fps->delay;
+        @rects = @{$layers->blit($display)};
+        SDL::Video::update_rect($display, 0, 0, 0, 0);# if scalar @rects;
+        $fps->delay;
     }
 }
 
 sub can_drop {
-    my $card   = shift;
+    my $card       = shift;
     my $card_color = int($card / 13);
-    my $target = shift;
-    my $stack = $layers->get_layer_by_position(370 + 110 * $card_color, 40);
+    my $target     = shift;
+    my $stack      = $layers->by_position(370 + 110 * $card_color, 40);
     
-    printf("%s => %s\n", $card, $target);
     #my @stack = $layers->get_layers_behind_layer($stack);
     #my @stack = $layers->get_layers_ahead_layer($stack);
 
     # Könige dürfen auf leeres Feld
     if('12,25,38,51' =~ m/\b\Q$card\E\b/) {
-        return $target =~ m/empty_stack/ ? 1 : 0;
+        return 1 if $target =~ m/empty_stack/;
     }
     
     # Asse dürfen auf leeres Feld rechts oben
@@ -207,16 +227,15 @@ sub can_drop {
         return 1;
     }
     
-    printf("%s == %s\n", $target, $layers->[$stack]->{options}->{id});
     if($card =~ m/^\d+$/ && $target =~ m/^\d+$/
     && $card == $target + 1
-    && $target == $layers->[$stack]->{options}->{id}) {
+    && $target == $stack->data->{id}
+    && $stack->data->{visible}) {
         return 1;
     }
     
-    printf("%s => %s\n", $card, $target);
-    
     return 1 if($card =~ m/^\d+$/ && $target =~ m/^\d+$/
+             && '12,25,38,51' !~ m/\b\Q$card\E\b/
              && ($card + 14 == $target || $card + 40 == $target
               || $card - 12 == $target || $card - 38 == $target)
              );
@@ -224,39 +243,35 @@ sub can_drop {
     return 0;
 }
 
-sub show_card {
-    my @position = @_;
-    my $layer = $layers->get_layer_by_position(@position);
+sub hide_card {
+    my $layer = (scalar @_ == 2) ? $layers->by_position(@_) : shift;
 
-    if($layer > 0 && $layers->[$layer]->{options}->{id} =~ m/\d+/
-    && -e 'data/card_' . $layers->[$layer]->{options}->{id} . '.png') {
-        $layers->set(
-            $layer,
-            SDLx::Sprite->new(
-                image => 'data/card_' . $layers->[$layer]->{options}->{id} . '.png',
-                x => $layers->[$layer]->{layer}->x,
-                y => $layers->[$layer]->{layer}->y),
-            {id => $layers->[$layer]->{options}->{id}, visible => 1}
-        );
+    if($layer
+    && $layer->data->{id} =~ m/\d+/
+    && $layer->data->{visible}) {
+        $layer->surface(SDL::Image::load('data/card_back.png'));
+        $layer->data({id => $layer->data->{id}, visible => 0});
     }
 }
 
+sub show_card {
+    my $layer = (scalar @_ == 2) ? $layers->by_position(@_) : shift;
+
+    if($layer
+    && $layer->data->{id} =~ m/\d+/
+    && !$layer->data->{visible}) {
+        $layer->surface(SDL::Image::load('data/card_' . $layer->data->{id} . '.png'));
+        $layer->data({id => $layer->data->{id}, visible => 1});
+    }
+}
+
+my @layers_;
 sub init_background {
-    my $background   = SDLx::Sprite->new(image => 'data/background.png');
-       $layers->add($background, {id => 'background'});
-    for(0..6) {
-        my $empty_stack  = SDLx::Sprite->new(image => 'data/empty_stack.png');
-        $empty_stack->y( 200 );
-        $empty_stack->x( 20 + 110 * $_ );
-        $layers->add($empty_stack, {id => 'empty_stack'});
-    }
-    
-    for(0..3) {
-        my $empty_stack  = SDLx::Sprite->new(image => 'data/empty_target_' . $_ . '.png');
-        $empty_stack->y( 20 );
-        $empty_stack->x( 350 + 110 * $_ );
-        $layers->add($empty_stack, {id => 'empty_target_' . $_});
-    }
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/background.png'),                                   {id => 'background'}));
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),              20,  20,            {id => 'rewind_deck'}));
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),             130,  20,            {id => 'empty_deck'}));
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_target_' . $_ . '.png'), 350 + 110 * $_,  20, {id => 'empty_target_' . $_})) for(0..3);
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),              20 + 110 * $_, 200, {id => 'empty_stack'}))        for(0..6);
 }
 
 sub init_cards {
@@ -265,8 +280,10 @@ sub init_cards {
     my @card_value     = fisher_yates_shuffle([0..51]);
     for(0..51)
     {
-        my $card    = SDLx::Sprite->new(image => 'data/card_back.png');
+        my $image   = 'data/card_back.png';
         my $visible = 0;
+        my $x       = 20;
+        my $y       = 20;
         
         if($_ < 28)
         {
@@ -277,20 +294,15 @@ sub init_cards {
             }
             if($stack_position == $stack_index)
             {
-                $card    = SDLx::Sprite->new(image => 'data/card_' . $card_value[$_] . '.png');
+                $image   = 'data/card_' . $card_value[$_] . '.png';
                 $visible = 1;
             }
-            $card->x(  20 + 110 * $stack_index );
-            $card->y( 200 +  20 * $stack_position);
+            $x =  20 + 110 * $stack_index;
+            $y = 200 +  20 * $stack_position;
             $stack_position++;
         }
-        else
-        {
-            $stack_index = 7;
-            $card->x( 20 );
-            $card->y( 20 );
-        }
-        $layers->add($card, {id => $card_value[$_], visible => $visible});
+        
+        $layers->add(SDLx::Layer->new(SDL::Image::load($image), $x, $y, {id => $card_value[$_], visible => $visible}));
     }
 }
 

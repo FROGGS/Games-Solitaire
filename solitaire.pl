@@ -98,6 +98,28 @@ sub event_loop
                         if(can_drop($layer->data->{id}, $target->data->{id})) {
                             $layer->attach($event->button_x, $event->button_y);
                             $layer->foreground;
+                            #my $x = $layer->pos->x < $target->pos->x ? $layer->pos->x : $target->pos->x;
+                            #my $y = $layer->pos->y < $target->pos->y ? $layer->pos->y : $target->pos->y;
+                            #my $w = $layer->pos->x > $target->pos->x ? $layer->pos->x : $target->pos->x;
+                            #my $h = $layer->pos->y > $target->pos->y ? $layer->pos->y : $target->pos->y;
+                            my $dist  = 999;
+                            my $steps = sqrt(($target->pos->x - $layer->pos->x) * ($target->pos->x - $layer->pos->x)
+                                           + ($target->pos->y - $layer->pos->y) * ($target->pos->y - $layer->pos->y)) / 40;
+                            my $step_x = ($target->pos->x - $layer->pos->x) / $steps;
+                            my $step_y = ($target->pos->y - $layer->pos->y) / $steps;
+                            while($dist > 40) {
+                                
+                                #$w += $layer->clip->w - $x;
+                                #$h += $layer->clip->h - $y;
+                                $layer->pos($layer->pos->x + $step_x, $layer->pos->y + $step_y);
+                                $layers->blit($display);
+                                #SDL::Video::update_rect($display, $x, $y, $w, $h);
+                                SDL::Video::update_rect($display, 0, 0, 0, 0);
+                                $fps->delay;
+                                
+                                $dist = sqrt(($target->pos->x - $layer->pos->x) * ($target->pos->x - $layer->pos->x)
+                                           + ($target->pos->y - $layer->pos->y) * ($target->pos->y - $layer->pos->y));
+                            }
                             $layer->detach_xy($target->pos->x, $target->pos->y);
                             show_card(pop @stack) if scalar @stack;
                             $dropped = 1;

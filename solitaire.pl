@@ -129,6 +129,8 @@ sub game
         on_drag => sub {
         },
         on_drop    => sub {
+            # @selected_cards contains whatever set
+            # of cards the player is moving around
             if(scalar @selected_cards) {
                 my @selected_cards_ = ();
                 push(@selected_cards_, $_->foreground) for @selected_cards;
@@ -217,6 +219,8 @@ sub game
             }
         },
         on_mousemove => sub {
+        },
+        on_keydown => sub {
         },
     };
     

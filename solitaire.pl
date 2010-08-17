@@ -54,20 +54,31 @@ sub event_loop
     SDL::Events::pump_events();
     while(SDL::Events::poll_event($event))
     {
-        $left_mouse_down = 1            if $event->type == SDL_MOUSEBUTTONDOWN && $event->button_button == SDL_BUTTON_LEFT;
-        $left_mouse_down = 0            if $event->type == SDL_MOUSEBUTTONUP   && $event->button_button == SDL_BUTTON_LEFT;
-    
-        $handler->{on_quit}->()         if defined $handler->{on_quit}      && ($event->type == SDL_QUIT || ($event->type == SDL_KEYDOWN && $event->key_sym == SDLK_ESCAPE));
-        $handler->{on_keydown}->()      if defined $handler->{on_keydown}   && $event->type == SDL_KEYDOWN;
-        $handler->{on_mousemove}->()    if defined $handler->{on_mousemove} && $event->type == SDL_MOUSEMOTION && !$left_mouse_down;
-        $handler->{on_drag}->()         if defined $handler->{on_drag}      && $event->type == SDL_MOUSEMOTION && $left_mouse_down;
-        $handler->{on_drop}->()         if defined $handler->{on_drop}      && $event->type == SDL_MOUSEBUTTONUP;
-        $handler->{on_click}->()        if defined $handler->{on_click}     && $event->type == SDL_MOUSEBUTTONDOWN && Time::HiRes::time - $last_click >= 0.3;
-        $handler->{on_dblclick}->()     if defined $handler->{on_dblclick}  && $event->type == SDL_MOUSEBUTTONDOWN && Time::HiRes::time - $last_click < 0.3;
-        
-        $last_click = Time::HiRes::time if $event->type == SDL_MOUSEBUTTONDOWN;
-        
-        if($event->type == SDL_MOUSEBUTTONUP) {
+        my $type = $event->type;
+
+        if ($type == SDL_MOUSEBUTTONDOWN) {
+            $left_mouse_down = 1 if $event->button_button == SDL_BUTTON_LEFT;
+            my $time = Time::HiRes::time;
+            if ($time - $last_click >= 0.3) {
+                $handler->{on_click}->();
+            }
+            else {
+                $handler->{on_dblclick}->();
+            }
+            $last_click = $time;
+        }
+        elsif ($type == SDL_MOUSEMOTION) {
+            if ($left_mouse_down) {
+                $handler->{on_drag}->();
+            }
+            else {
+                $handler->{on_mousemove}->();
+            }
+        }
+        elsif ($type == SDL_MOUSEBUTTONUP) {
+            $left_mouse_down = 0 if $event->button_button == SDL_BUTTON_LEFT;
+            $handler->{on_drop}->();
+
             my $dropped = 1;
             while($dropped) {
                 $dropped = 0;
@@ -94,6 +105,13 @@ sub event_loop
                     }
                 }
             }
+        }
+        elsif ($type == SDL_KEYDOWN) {
+            $handler->{on_quit}->() if $event->key_sym == SDLK_ESCAPE;
+            $handler->{on_keydown}->();
+        }
+        elsif ($type == SDL_QUIT) {
+            $handler->{on_quit}->();
         }
     }
 }
@@ -197,6 +215,8 @@ sub game
                     show_card($event->button_x, $event->button_y);
                 }
             }
+        },
+        on_mousemove => sub {
         },
     };
     

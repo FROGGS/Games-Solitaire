@@ -188,6 +188,7 @@ sub game
                         $layer = $layers->by_position(150, 40);
                         my @cards = ($layer, @{$layer->behind});
                         pop @cards;
+                        pop @cards;
                         foreach(@cards) {
                             $_->attach(150, 40);
                             $_->foreground;

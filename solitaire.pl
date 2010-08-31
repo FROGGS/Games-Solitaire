@@ -129,7 +129,14 @@ sub event_loop
             }
         }
         elsif ($type == SDL_KEYDOWN) {
-            $handler->{on_quit}->() if $event->key_sym == SDLK_ESCAPE;
+            if($event->key_sym == SDLK_PRINT) {
+                my $screen_shot_index = 1;
+                map{$screen_shot_index = $1 + 1 if $_ =~ /Shot(\d+)\.bmp/ && $1 >= $screen_shot_index} <Shot*\.bmp>;
+                SDL::Video::save_BMP($display, sprintf("Shot%04d.bmp", $screen_shot_index ));
+            }
+            elsif($event->key_sym == SDLK_ESCAPE) {
+                $handler->{on_quit}->();
+            }
             $handler->{on_keydown}->();
         }
         elsif ($type == SDL_QUIT) {

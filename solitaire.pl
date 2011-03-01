@@ -1,15 +1,5 @@
 #!/usr/bin/perl
 
-=pod TODO
-
-( ) Karten ablegen automatisch
-( ) LayerManager: indirekte überdeckende Karten
-( ) Karten oben rechts nicht oben rechts anlegbar
-( ) Doppelklick legt auf falsche Farbe (kreuz 10 auf roten bube)
-( ) Könige können oben rechts nicht abgelegt werden
-
-=cut
-
 package Games::Solitaire;
 
 use strict;
@@ -33,6 +23,7 @@ use SDLx::FPS;
 
 SDL::init(SDL_INIT_VIDEO);
 my $display      = SDL::Video::set_video_mode(800, 600, 32, SDL_HWSURFACE | SDL_HWACCEL); # SDL_DOUBLEBUF
+SDL::Video::wm_set_icon('test/data/icon.png');
 my $layers       = SDLx::LayerManager->new();
 my $event        = SDL::Event->new();
 my $loop         = 1;
@@ -40,6 +31,7 @@ my $last_click   = Time::HiRes::time;
 my $fps          = SDLx::FPS->new(fps => 60);
 my @selected_cards = ();
 my $left_mouse_down = 0;
+my $handler      = {};
 
 init_background();
 init_cards();
@@ -49,8 +41,6 @@ game();
 
 sub event_loop
 {
-    my $handler = shift;
-    
     SDL::Events::pump_events();
     while(SDL::Events::poll_event($event))
     {
@@ -150,7 +140,7 @@ sub game
     my @selected_cards = ();
     my $x = 0;
     my $y = 0;
-    my $handler =
+    $handler =
     {
         on_quit    => sub {
             $loop = 0;
@@ -255,7 +245,7 @@ sub game
     };
     
     while($loop) {
-        event_loop($handler);
+        event_loop();
         @rects = @{$layers->blit($display)};
         SDL::Video::update_rect($display, 0, 0, 0, 0);# if scalar @rects;
         $fps->delay;

@@ -22,8 +22,14 @@ use SDLx::Layer;
 use SDLx::FPS;
 
 SDL::init(SDL_INIT_VIDEO);
-my $display      = SDL::Video::set_video_mode(800, 600, 32, SDL_HWSURFACE | SDL_HWACCEL); # SDL_DOUBLEBUF
-SDL::Video::wm_set_icon('test/data/icon.png');
+
+my $WINDOW_WIDTH = 800;
+my $WINDOW_HEIGHT = 600;
+
+my $display      = SDL::Video::set_video_mode(
+    $WINDOW_WIDTH, $WINDOW_HEIGHT, 32, SDL_HWSURFACE | SDL_HWACCEL
+); # SDL_DOUBLEBUF
+
 my $layers       = SDLx::LayerManager->new();
 my $event        = SDL::Event->new();
 my $loop         = 1;
@@ -31,7 +37,6 @@ my $last_click   = Time::HiRes::time;
 my $fps          = SDLx::FPS->new(fps => 60);
 my @selected_cards = ();
 my $left_mouse_down = 0;
-my $handler      = {};
 
 init_background();
 init_cards();
@@ -39,8 +44,98 @@ my @rects = @{$layers->blit($display)};
 SDL::Video::update_rects($display, @rects) if scalar @rects;
 game();
 
+sub _x
+{
+    return shift->pos->x;
+}
+
+sub _y
+{
+    return shift->pos->y;
+}
+
+sub _is_num {
+    return shift =~ m{\A\d+\z};
+}
+
+sub _handle_mouse_button_up
+{
+    my ($handler) = @_;
+
+    $left_mouse_down = 0 if $event->button_button == SDL_BUTTON_LEFT;
+    $handler->{on_drop}->();
+
+    my $dropped = 1;
+    while($dropped) {
+        $dropped = 0;
+        for(-1..6) {
+            my $layer = $_ == -1
+                      ? $layers->by_position( 150, 40 )
+                      : $layers->by_position( 40 + 110 * $_, 220 );
+            my @stack = ($layer, @{$layer->ahead});
+               $layer = pop @stack if scalar @stack;
+            
+            if(defined $layer
+            && $layer->data->{id} =~ m/\d+/
+            && $layer->data->{visible}
+            && !scalar @{$layer->ahead}) {
+                my $target = $layers->by_position(
+                    370 + 110 * int($layer->data->{id} / 13), 40
+                );
+
+                if(can_drop($layer->data->{id}, $target->data->{id})) {
+
+                    $layer->attach($event->button_x, $event->button_y);
+                    $layer->foreground;
+
+                    my $square = sub { my $n = shift; return $n*$n; };
+
+                    my $calc_dx = sub {
+                        return ( _x($target) - _x($layer) ); 
+                    };
+                    my $calc_dy = sub { 
+                        return ( _y($target) - _y($layer) ); 
+                    };
+
+                    my $calc_dist = sub {
+                        return sqrt(
+                            $square->($calc_dx->()) + $square->($calc_dy->())
+                        );
+                    };
+
+                    my $dist  = 999;
+                    my $steps = $calc_dist->() / 40;
+
+                    my $step_x = $calc_dx->() / $steps;
+                    my $step_y = $calc_dy->() / $steps;
+
+                    while($dist > 40) {
+                        
+                        #$w += $layer->clip->w - $x;
+                        #$h += $layer->clip->h - $y;
+                        $layer->pos(
+                            _x($layer) + $step_x, _y($layer) + $step_y
+                        );
+                        $layers->blit($display);
+                        #SDL::Video::update_rect($display, $x, $y, $w, $h);
+                        SDL::Video::update_rect($display, 0, 0, 0, 0);
+                        $fps->delay;
+                        
+                        $dist = $calc_dist->();
+                    }
+                    $layer->detach_xy(_x($target), _y($target));
+                    show_card(pop @stack) if scalar @stack;
+                    $dropped = 1;
+                }
+            }
+        }
+    }
+}
+
 sub event_loop
 {
+    my $handler = shift;
+    
     SDL::Events::pump_events();
     while(SDL::Events::poll_event($event))
     {
@@ -66,62 +161,25 @@ sub event_loop
             }
         }
         elsif ($type == SDL_MOUSEBUTTONUP) {
-            $left_mouse_down = 0 if $event->button_button == SDL_BUTTON_LEFT;
-            $handler->{on_drop}->();
-
-            my $dropped = 1;
-            while($dropped) {
-                $dropped = 0;
-                for(-1..6) {
-                    my $layer = $_ == -1
-                              ? $layers->by_position( 150, 40 )
-                              : $layers->by_position( 40 + 110 * $_, 220 );
-                    my @stack = ($layer, @{$layer->ahead});
-                       $layer = pop @stack if scalar @stack;
-                    
-                    if(defined $layer
-                    && $layer->data->{id} =~ m/\d+/
-                    && $layer->data->{visible}
-                    && !scalar @{$layer->ahead}) {
-                        my $target = $layers->by_position(370 + 110 * int($layer->data->{id} / 13), 40);
-
-                        if(can_drop($layer->data->{id}, $target->data->{id})) {
-                            $layer->attach($event->button_x, $event->button_y);
-                            $layer->foreground;
-                            #my $x = $layer->pos->x < $target->pos->x ? $layer->pos->x : $target->pos->x;
-                            #my $y = $layer->pos->y < $target->pos->y ? $layer->pos->y : $target->pos->y;
-                            #my $w = $layer->pos->x > $target->pos->x ? $layer->pos->x : $target->pos->x;
-                            #my $h = $layer->pos->y > $target->pos->y ? $layer->pos->y : $target->pos->y;
-                            my $dist  = 999;
-                            my $steps = sqrt(($target->pos->x - $layer->pos->x) * ($target->pos->x - $layer->pos->x)
-                                           + ($target->pos->y - $layer->pos->y) * ($target->pos->y - $layer->pos->y)) / 40;
-                            my $step_x = ($target->pos->x - $layer->pos->x) / $steps;
-                            my $step_y = ($target->pos->y - $layer->pos->y) / $steps;
-                            while($dist > 40) {
-                                
-                                #$w += $layer->clip->w - $x;
-                                #$h += $layer->clip->h - $y;
-                                $layer->pos($layer->pos->x + $step_x, $layer->pos->y + $step_y);
-                                $layers->blit($display);
-                                #SDL::Video::update_rect($display, $x, $y, $w, $h);
-                                SDL::Video::update_rect($display, 0, 0, 0, 0);
-                                $fps->delay;
-                                
-                                $dist = sqrt(($target->pos->x - $layer->pos->x) * ($target->pos->x - $layer->pos->x)
-                                           + ($target->pos->y - $layer->pos->y) * ($target->pos->y - $layer->pos->y));
-                            }
-                            $layer->detach_xy($target->pos->x, $target->pos->y);
-                            show_card(pop @stack) if scalar @stack;
-                            $dropped = 1;
-                        }
-                    }
-                }
-            }
+            _handle_mouse_button_up($handler);
         }
         elsif ($type == SDL_KEYDOWN) {
             if($event->key_sym == SDLK_PRINT) {
+
                 my $screen_shot_index = 1;
-                map{$screen_shot_index = $1 + 1 if $_ =~ /Shot(\d+)\.bmp/ && $1 >= $screen_shot_index} <Shot*\.bmp>;
+
+                # TODO : perhaps do it using max.
+                foreach my $bmp_fn (<Shot*\.bmp>)
+                {
+                    if (my ($new_index) = $bmp_fn =~ /Shot(\d+)\.bmp/)
+                    { 
+                        if ($new_index >= $screen_shot_index)
+                        {
+                            $screen_shot_index = $new_index + 1;
+                        }
+                    }
+                }
+
                 SDL::Video::save_BMP($display, sprintf("Shot%04d.bmp", $screen_shot_index ));
             }
             elsif($event->key_sym == SDLK_ESCAPE) {
@@ -140,7 +198,7 @@ sub game
     my @selected_cards = ();
     my $x = 0;
     my $y = 0;
-    $handler =
+    my $handler =
     {
         on_quit    => sub {
             $loop = 0;
@@ -161,14 +219,14 @@ sub game
                 my @position_before = ();
                 
                 if(scalar @stack) {
-                    # auf leeres Feld
+                    # to empty field
                     if($stack[0]->data->{id} =~ m/empty_stack/
                        && can_drop($selected_cards[0]->data->{id}, $stack[0]->data->{id})) {
                         @position_before = @{$layers->detach_xy($stack[0]->pos->x, $stack[0]->pos->y)};
                         $dropped         = 1;
                     }
                     
-                    # auf offene Karte
+                    # to face-up card
                     elsif($stack[0]->data->{visible}
                        && can_drop($selected_cards[0]->data->{id}, $stack[0]->data->{id})) {
                         @position_before = @{$layers->detach_xy($stack[0]->pos->x, $stack[0]->pos->y + 20)};
@@ -176,7 +234,7 @@ sub game
                     }
                     
                     if($dropped && scalar @position_before) {
-                        $position_before[0] += 20; # transparenter Rand
+                        $position_before[0] += 20; # transparent border
                         $position_before[1] += 20;
                         show_card(@position_before);
                     }
@@ -228,12 +286,14 @@ sub game
             && !scalar @{$layer->ahead}
             && $layer->data->{id} =~ m/\d+/
             && $layer->data->{visible}) {
-                my $target = $layers->by_position(370 + 110 * int($layer->data->{id} / 13), 40);
+                my $target = $layers->by_position(
+                    370 + 11 * int($layer->data->{id} / 13), 40
+                );
 
                 if(can_drop($layer->data->{id}, $target->data->{id})) {
                     $layer->attach($event->button_x, $event->button_y);
                     $layer->foreground;
-                    $layer->detach_xy($target->pos->x, $target->pos->y);
+                    $layer->detach_xy(_x($target), _y($target));
                     show_card($event->button_x, $event->button_y);
                 }
             }
@@ -245,12 +305,14 @@ sub game
     };
     
     while($loop) {
-        event_loop();
+        event_loop($handler);
         @rects = @{$layers->blit($display)};
         SDL::Video::update_rect($display, 0, 0, 0, 0);# if scalar @rects;
         $fps->delay;
     }
 }
+
+my %KING_CARDS = (map { $_ => 1 } (12,25,38,51));
 
 sub can_drop {
     my $card       = shift;
@@ -261,28 +323,35 @@ sub can_drop {
     #my @stack = $layers->get_layers_behind_layer($stack);
     #my @stack = $layers->get_layers_ahead_layer($stack);
 
-    # Könige dürfen auf leeres Feld
-    if('12,25,38,51' =~ m/\b\Q$card\E\b/) {
+    # Kings cannot be put on empty fields.
+    if (exists($KING_CARDS{$card})) {
         return 1 if $target =~ m/empty_stack/;
     }
     
-    # Asse dürfen auf leeres Feld rechts oben
+    # Aces can be put on empty field (at upper right)
     if('0,13,26,39' =~ m/\b\Q$card\E\b/ && $target =~ m/empty_target_\Q$card_color\E/) {
         return 1;
     }
     
-    if($card =~ m/^\d+$/ && $target =~ m/^\d+$/
-    && $card == $target + 1
-    && $target == $stack->data->{id}
-    && $stack->data->{visible}) {
+    my $are_nums = _is_num($card) && _is_num($target);
+
+    if ($are_nums
+        && $card == $target + 1
+        && $target == $stack->data->{id}
+        && $stack->data->{visible}
+    ) 
+    {
         return 1;
     }
     
-    return 1 if($card =~ m/^\d+$/ && $target =~ m/^\d+$/
-             && '12,25,38,51' !~ m/\b\Q$card\E\b/
-             && ($card + 14 == $target || $card + 40 == $target
-              || $card - 12 == $target || $card - 38 == $target)
-             );
+    if($are_nums
+        && '12,25,38,51' !~ m/\b\Q$card\E\b/
+        && ($card + 14 == $target || $card + 40 == $target
+            || $card - 12 == $target || $card - 38 == $target)
+    )
+    {
+        return 1;
+    }
     
     return 0;
 }

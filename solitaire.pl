@@ -23,7 +23,7 @@ use SDLx::FPS;
 
 SDL::init(SDL_INIT_VIDEO);
 
-my $WINDOW_WIDTH = 800;
+my $WINDOW_WIDTH  = 800;
 my $WINDOW_HEIGHT = 600;
 
 my $display      = SDL::Video::set_video_mode(
@@ -37,6 +37,10 @@ my $last_click   = Time::HiRes::time;
 my $fps          = SDLx::FPS->new(fps => 60);
 my @selected_cards = ();
 my $left_mouse_down = 0;
+my @rewind_deck_1_position = (  20, 20);
+my @rewind_deck_1_hotspot  = (  40, 40);
+my @rewind_deck_2_position = ( 130, 20);
+my @rewind_deck_2_hotspot  = ( 150, 40);
 
 init_background();
 init_cards();
@@ -70,7 +74,7 @@ sub _handle_mouse_button_up
         $dropped = 0;
         for(-1..6) {
             my $layer = $_ == -1
-                      ? $layers->by_position( 150, 40 )
+                      ? $layers->by_position( @rewind_deck_2_hotspot )
                       : $layers->by_position( 40 + 110 * $_, 220 );
             my @stack = ($layer, @{$layer->ahead});
                $layer = pop @stack if scalar @stack;
@@ -257,20 +261,20 @@ sub game
                         elsif(!scalar @{$layer->ahead}) {
                             $layer->attach($event->button_x, $event->button_y);
                             $layer->foreground;
-                            $layer->detach_xy(130, 20);
+                            $layer->detach_xy(@rewind_deck_2_position);
                             show_card($layer);
                         }
                     }
                     elsif($layer->data->{id} =~ m/rewind_deck/) {
-                        $layer = $layers->by_position(150, 40);
+                        $layer = $layers->by_position(@rewind_deck_2_hotspot);
                         my @cards = ($layer, @{$layer->behind});
                         pop @cards;
                         pop @cards;
                         foreach(@cards) {
-                            $_->attach(150, 40);
+                            $_->attach(@rewind_deck_2_hotspot);
                             $_->foreground;
-                            $_->detach_xy(20, 20);
-                            hide_card(40, 40);
+                            $_->detach_xy(@rewind_deck_1_position);
+                            hide_card(@rewind_deck_1_hotspot);
                         }
                     }
                 }
@@ -347,7 +351,7 @@ sub can_drop {
     if($are_nums
         && '12,25,38,51' !~ m/\b\Q$card\E\b/
         && ($card + 14 == $target || $card + 40 == $target
-            || $card - 12 == $target || $card - 38 == $target)
+         || $card - 12 == $target || $card - 38 == $target)
     )
     {
         return 1;
@@ -380,11 +384,11 @@ sub show_card {
 
 my @layers_;
 sub init_background {
-    $layers->add(SDLx::Layer->new(SDL::Image::load('data/background.png'),                                   {id => 'background'}));
-    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),              20,  20,            {id => 'rewind_deck'}));
-    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),             130,  20,            {id => 'empty_deck'}));
-    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_target_' . $_ . '.png'), 350 + 110 * $_,  20, {id => 'empty_target_' . $_})) for(0..3);
-    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),              20 + 110 * $_, 200, {id => 'empty_stack'}))        for(0..6);
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/background.png'),                                       {id => 'background'}));
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),             @rewind_deck_1_position, {id => 'rewind_deck'}));
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),             @rewind_deck_2_position, {id => 'empty_deck'}));
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_target_' . $_ . '.png'), 350 + 110 * $_,  20,     {id => 'empty_target_' . $_})) for(0..3);
+    $layers->add(SDLx::Layer->new(SDL::Image::load('data/empty_stack.png'),              20 + 110 * $_, 200,     {id => 'empty_stack'}))        for(0..6);
 }
 
 sub init_cards {
@@ -395,8 +399,7 @@ sub init_cards {
     {
         my $image   = 'data/card_back.png';
         my $visible = 0;
-        my $x       = 20;
-        my $y       = 20;
+        my ($x, $y) = @rewind_deck_1_position;
         
         if($_ < 28)
         {
